@@ -11,10 +11,25 @@ body {
 	max-height: 10em;
 	overflow: scroll;
 }
+
+#decodedText {
+	margin-top: 20px;
+	font-size: 1.2em;
+	font-weight: bold;
+}
 		</style>
 		<script type="module">
-const Millisecond = 1
-const Second = Millisecond * 1000
+const Millisecond = 1;
+const Second = Millisecond * 1000;
+
+// State to accumulate Morse code message data
+let accumulatedDurations = [];
+let lastTimestamp = 0;
+let characterTimeoutHandle = null;
+let wordTimeoutHandle = null;
+const CHARACTER_TIMEOUT = 3; // Timeout in units to determine character boundary
+const WORD_TIMEOUT = 7; // Timeout in units to determine word boundary
+let decodedString = "";
 
 /** Vail server connection.
  *
@@ -45,7 +60,7 @@ class Vail extends EventTarget {
 		super()
 
 		/** URL to our WebSocket */
-		this.url = new URL("wss://vail.woozle.org/chat")
+		this.url = new URL("ws://localhost:8080/chat")
 		this.url.searchParams.set("repeater", repeater)
 
 		/** Delay to add */
@@ -144,30 +159,149 @@ class Vail extends EventTarget {
 	}
 }
 
-/** Handle the message event by logging it.
+// Helper function to decode Morse code based on the timing rules
+function decodeMorse(durations, unitTime) {
+	const DIT_UNIT = unitTime;
+	const DAH_UNIT = DIT_UNIT * 3;
+
+	let morseSymbols = "";
+	for (let i = 0; i < durations.length; i++) {
+		const duration = durations[i];
+
+		if (duration < DIT_UNIT * 1.5) {
+			morseSymbols += "."; // dit
+		} else if (duration < DAH_UNIT * 1.5) {
+			morseSymbols += "-"; // dah
+		}
+	}
+
+	return morseSymbols;
+}
+
+// Helper function to translate Morse code symbols into text
+function morseToText(morseCode) {
+	const MORSE_DICT = {
+		".-": "A",
+		"-...": "B",
+		"-.-.": "C",
+		"-..": "D",
+		".": "E",
+		"..-.": "F",
+		"--.": "G",
+		"....": "H",
+		"..": "I",
+		".---": "J",
+		"-.-": "K",
+		".-..": "L",
+		"--": "M",
+		"-.": "N",
+		"---": "O",
+		".--.": "P",
+		"--.-": "Q",
+		".-.": "R",
+		"...": "S",
+		"-": "T",
+		"..-": "U",
+		"...-": "V",
+		".--": "W",
+		"-..-": "X",
+		"-.--": "Y",
+		"--..": "Z",
+		"-----": "0",
+		".----": "1",
+		"..---": "2",
+		"...--": "3",
+		"....-": "4",
+		".....": "5",
+		"-....": "6",
+		"--...": "7",
+		"---..": "8",
+		"----.": "9",
+		".-.-.-": ".",
+		"--..--": ",",
+		"..--..": "?",
+		"/": " ",
+	};
+
+	return morseCode
+		.split(" ")
+		.map(symbol => MORSE_DICT[symbol] || "")
+		.join("");
+}
+
+/** Handle the message event by logging it and decoding Morse code.
  *
  * We also take the opportunity to update the listed number of clients.
  */
 function message(event) {
-	let log = document.querySelector("#messages .log")
-	let line = log.appendChild(document.createElement("div"))
-	line.textContent = JSON.stringify(event.detail.message)
-	line.scrollIntoView()
+	let log = document.querySelector("#messages .log");
+	let line = log.appendChild(document.createElement("div"));
+	line.textContent = JSON.stringify(event.detail.message);
+	line.scrollIntoView();
 
-	let clients = document.querySelector("#clients")
-	clients.textContent = event.target.clients
+	let clients = document.querySelector("#clients");
+	clients.textContent = event.target.clients;
+
+	// Accumulate durations for Morse code decoding
+	const durations = event.detail.message.Duration;
+	const timestamp = event.detail.message.Timestamp;
+	if (durations && durations.length > 0) {
+		if (characterTimeoutHandle) {
+			clearTimeout(characterTimeoutHandle);
+		}
+
+		accumulatedDurations.push(durations[0]);
+		lastTimestamp = timestamp;
+
+		// Set a timeout to determine end of character
+		const wpm = 15; // Assume 15 words per minute as the initial speed
+		const unitTime = 60 / (50 * wpm) * 1000; // Calculate unit time based on WPM
+		const timeoutDuration = CHARACTER_TIMEOUT * unitTime * 1.5; // Add padding to the timeout duration
+		characterTimeoutHandle = setTimeout(() => {
+			// Decode the accumulated durations
+			const morseCode = decodeMorse(accumulatedDurations, unitTime);
+			const decodedText = morseToText(morseCode);
+
+			// Display the decoded character in a separate area
+			if (decodedText.trim() !== "") {
+				decodedString += decodedText;
+			}
+			let decodedTextElement = document.getElementById("decodedText");
+			decodedTextElement.textContent = `Decoded Message: ${decodedString}`;
+
+			// Clear accumulated data
+			accumulatedDurations = [];
+			lastTimestamp = 0;
+		}, timeoutDuration);
+	}
+
+	// Set a timeout to determine end of word
+	const wpm = 15; // Assume 15 words per minute as the initial speed
+	const unitTime = 60 / (50 * wpm) * 1000; // Calculate unit time based on WPM
+	const wordTimeoutDuration = WORD_TIMEOUT * unitTime * 1.5; // Add padding to the word timeout duration
+	if (wordTimeoutHandle) {
+		clearTimeout(wordTimeoutHandle);
+	}
+	wordTimeoutHandle = setTimeout(() => {
+		// Insert a space if the last character was not already a space
+		if (decodedString.slice(-1) !== " ") {
+			decodedString += " ";
+			let decodedTextElement = document.getElementById("decodedText");
+			decodedTextElement.textContent = `Decoded Message: ${decodedString}`;
+		}
+	}, wordTimeoutDuration);
 }
 
 /** Handle the sound and nosound events by displaying different glyphs */
 function sound(event, enable) {
-	let sounder = document.querySelector("#sounder")
-	sounder.textContent = enable ? "█" : ""
+	let sounder = document.querySelector("#sounder");
+	sounder.textContent = enable ? "█" : "";
 }
 
-let vail = new Vail("demo") // Connect to the "demo" repeater
-vail.addEventListener("message", event => message(event))
-vail.addEventListener("sound", event => sound(event, true))
-vail.addEventListener("nosound", event => sound(event, false))
+let vail = new Vail("demo"); // Connect to the "demo" repeater
+vail.addEventListener("message", event => message(event));
+vail.addEventListener("sound", event => sound(event, true));
+vail.addEventListener("nosound", event => sound(event, false));
 		</script>
 	</head>
 	<body>
@@ -181,5 +315,7 @@ vail.addEventListener("nosound", event => sound(event, false))
 			<h2>messages</h2>
 			<div class="log"></div>
 		</div>
+
+		<div id="decodedText">Decoded Message: </div>
 	</body>
 </html>
