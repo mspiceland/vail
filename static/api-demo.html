@@ -20,10 +20,25 @@ p {
 	max-height: 10em;
 	overflow: scroll;
 }
+
+#decodedText {
+	margin-top: 20px;
+	font-size: 1.2em;
+	font-weight: bold;
+}
+
+#wpmDisplay {
+	margin-top: 10px;
+	font-size: 1.1em;
+	font-weight: bold;
+}
 		</style>
 		<script type="module">
-const Millisecond = 1
-const Second = Millisecond * 1000
+let characterTimeoutHandle = null;
+import { decodeMorse, morseToText, updateDurations, clearAccumulatedDurations, getAccumulatedDurations, getWpm, appendToDecodedString, getDecodedString } from './decoder.mjs';
+
+const Millisecond = 1;
+const Second = Millisecond * 1000;
 
 /** Vail server connection.
  *
@@ -55,7 +70,7 @@ class Vail extends EventTarget {
 		super()
 
 		/** URL to our WebSocket */
-		this.url = new URL("wss://vail.woozle.org/chat")
+		this.url = new URL("ws://localhost:8080/chat")
 		this.url.searchParams.set("repeater", repeater)
 
 		/** Delay to add */
@@ -166,10 +181,37 @@ function clients(event) {
 	clients.textContent = event.target.clients
 }
 
-/** Handle the sound and nosound events by displaying different glyphs. */
-function sound(event, enable) {
-	let sounder = document.querySelector("#sounder")
-	sounder.textContent = enable ? "█" : ""
+/** Handle the sound events for decoding Morse code. */
+function sound(event) {
+	const { when, duration, transmitters } = event.detail;
+	if (transmitters > 0) {
+		// Update durations and get WPM
+		let currentWpm = updateDurations(duration, when);
+
+		// Update WPM display
+		let wpmElement = document.getElementById("wpmDisplay");
+		wpmElement.textContent = `Guessed WPM: ${currentWpm}`;
+
+		// Set a timeout to determine end of character
+		const unitTime = 60 / (50 * currentWpm) * 1000; // Calculate unit time based on WPM
+		const timeoutDuration = 3 * unitTime * 1.5; // Add padding to the timeout duration
+		if (characterTimeoutHandle) {
+			clearTimeout(characterTimeoutHandle);
+		}
+		characterTimeoutHandle = setTimeout(() => {
+			// Decode the accumulated durations
+			const morseCode = decodeMorse(getAccumulatedDurations(), unitTime);
+			const decodedText = morseToText(morseCode);
+
+			// Display the decoded character in a separate area
+			appendToDecodedString(decodedText);
+			let decodedTextElement = document.getElementById("decodedText");
+			decodedTextElement.textContent = `Decoded Message: ${getDecodedString()}`;
+
+			// Clear accumulated data
+			clearAccumulatedDurations();
+		}, timeoutDuration);
+	}
 }
 
 let vail = new Vail("demo") // Connect to the "demo" repeater
@@ -179,8 +221,7 @@ vail.addEventListener("sound", event => log("#sounds", event))
 vail.addEventListener("nosound", event => log("#sounds", event))
 
 vail.addEventListener("clients", event => clients(event))
-vail.addEventListener("sound", event => sound(event, true))
-vail.addEventListener("nosound", event => sound(event, false))
+vail.addEventListener("sound", event => sound(event))
 		</script>
 	</head>
 	<body>
@@ -189,6 +230,8 @@ vail.addEventListener("nosound", event => sound(event, false))
 		<div><a href="https://vail.woozle.org/#demo" target="_blank">Repeater</a></div>
 		<div>Sounder: <span id="sounder"></span></div>
 		<div>Clients: <span id="nclients">0</span></div>
+		<div id="wpmDisplay">Guessed WPM: 15</div>
+		<div id="decodedText">Decoded Message: </div>
 
 		<section id="sounds">
 			<h2>sound events</h2>
