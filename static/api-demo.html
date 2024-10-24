@@ -34,8 +34,11 @@ p {
 }
 		</style>
 		<script type="module">
-let characterTimeoutHandle = null;
 import { decodeMorse, morseToText, updateDurations, clearAccumulatedDurations, getAccumulatedDurations, getWpm, appendToDecodedString, getDecodedString } from './decoder.mjs';
+
+let characterTimeoutHandle = null;
+let wordTimeoutHandle = null;
+const WORD_TIMEOUT = 7;
 
 const Millisecond = 1;
 const Second = Millisecond * 1000;
@@ -211,6 +214,20 @@ function sound(event) {
 			// Clear accumulated data
 			clearAccumulatedDurations();
 		}, timeoutDuration);
+
+		// Set a timeout to determine end of word
+		const wordTimeoutDuration = WORD_TIMEOUT * unitTime * 1.5; // Add padding to the word timeout duration
+		if (wordTimeoutHandle) {
+			clearTimeout(wordTimeoutHandle);
+		}
+		wordTimeoutHandle = setTimeout(() => {
+			// Insert a space if the last character was not already a space
+			if (getDecodedString().slice(-1) !== " ") {
+				appendToDecodedString(" ");
+				let decodedTextElement = document.getElementById("decodedText");
+				decodedTextElement.textContent = `Decoded Message: ${getDecodedString()}`;
+			}
+		}, wordTimeoutDuration);
 	}
 }
 
